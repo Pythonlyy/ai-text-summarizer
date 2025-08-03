@@ -1,11 +1,11 @@
 from flask import Flask, render_template, request, jsonify
-from transformers import pipeline
-import os
+import requests, os
 
 app = Flask(__name__)
+HF_API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+HF_API_TOKEN = os.environ.get("HF_TOKEN")  # store your token in Render environment variables
 
-# Use a smaller model for free-tier memory limits
-summarizer = pipeline("summarization", model="t5-small")
+headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
 
 @app.route("/")
 def index():
@@ -17,27 +17,18 @@ def summarize():
     text = data.get("article", "")
     length = data.get("length", "medium")
 
-    if text and len(text.split()) > 50:
-        # Truncate input to avoid out-of-memory
-        if len(text.split()) > 400:
-            text = " ".join(text.split()[:400])
-
-        if length == "short":
-            max_len, min_len = 60, 20
-        elif length == "long":
-            max_len, min_len = 200, 80
-        else:
-            max_len, min_len = 130, 30
-
-        try:
-            result = summarizer(text, max_length=max_len, min_length=min_len, do_sample=False)
-            summary = result[0]['summary_text']
-        except Exception as e:
-            summary = f"⚠️ Summarization failed: {str(e)}"
-
-        return jsonify({"summary": summary})
-    else:
+    if not text or len(text.split()) < 50:
         return jsonify({"summary": "Please enter at least 50 words."})
+
+    payload = {"inputs": text, "parameters": {"max_length": 130, "min_length": 30}}
+    response = requests.post(HF_API_URL, headers=headers, json=payload)
+
+    if response.status_code == 200:
+        summary = response.json()[0]['summary_text']
+    else:
+        summary = f"Error from Hugging Face API: {response.text}"
+
+    return jsonify({"summary": summary})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
